@@ -1,0 +1,2 @@
+#RxJava Priority Scheduler
+This is a priority scheduler for RxJava. Priority scheduler is not supportred by RxJava because tasks are submitted to specific workers when subscribed. This priority scheduler has a tricky implementation and the worker acts differently from the original one. It maintains a global priority queue and the worker threads are started once the scheduler is created. The worker threads will poll and execute available tasks in the queue. See [demo](./blob/master/src/main/java/Demo.java) for more details.
