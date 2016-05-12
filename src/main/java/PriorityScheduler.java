@@ -7,11 +7,33 @@ import rx.internal.util.RxThreadFactory;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class PriorityScheduler implements SchedulerLifecycle {
+    private BoundedPriorityBlockingQueue<PriorityAction> queue;
+    private BlockingQueue<PoolWorker> waitingQueue;
+
+    AtomicInteger waitingCount;
+    private int maxThreads = 0;
+    private int maxQueueSize;
+
+    /*
+    public void setMaxThreads(int maxThreads) {
+        this.maxThreads = maxThreads;
+    }
+
+    public void setMaxQueueSize(int maxQueueSize) {
+        this.maxQueueSize = maxQueueSize;
+    }
+    */
+
+    static final FixedSchedulerPool NONE = new FixedSchedulerPool(null, 0);
+
+    final ThreadFactory threadFactory;
+    final AtomicReference<FixedSchedulerPool> pool;
+
     public PriorityScheduler(int maxQueueSize, int maxThreads) {
         this(maxQueueSize, maxThreads, new RxThreadFactory("PriorityScheduler"));
     }
@@ -22,35 +44,13 @@ public final class PriorityScheduler implements SchedulerLifecycle {
         this.threadFactory = threadFactory;
         this.pool = new AtomicReference<FixedSchedulerPool>(NONE);
         queue = new BoundedPriorityBlockingQueue<>(maxQueueSize);
+        waitingCount = new AtomicInteger(0);
         start();
     }
-
-    private BoundedPriorityBlockingQueue<PriorityAction> queue;
-
-
-    int maxThreads = 0;
-    int maxQueueSize;
-
-
-    public void setMaxThreads(int maxThreads) {
-        this.maxThreads = maxThreads;
-    }
-
-    public void setMaxQueueSize(int maxQueueSize) {
-        this.maxQueueSize = maxQueueSize;
-    }
-
-
-    static final FixedSchedulerPool NONE = new FixedSchedulerPool(null, 0);
-
-    final ThreadFactory threadFactory;
-    final AtomicReference<FixedSchedulerPool> pool;
-
 
     Scheduler withPriority(int priority) {
         return new VirtualScheduler(priority);
     }
-
 
     @Override
     public void start() {
@@ -58,20 +58,23 @@ public final class PriorityScheduler implements SchedulerLifecycle {
         if (!pool.compareAndSet(NONE, update)) {
             update.shutdown();
         } else {
-
             for (PoolWorker worker : pool.get().getAllWorkers()) {
                 worker.scheduleActual(new Action0() {
                     @Override
                     public void call() {
                         while (true) {
-                            if (!queue.isEmpty()) {
+                            PriorityAction action = queue.poll();
+                            if (action != null) {
+                                action.call();
+                            } else {
                                 synchronized (queue) {
-                                    if (!queue.isEmpty()) {
-                                        queue.remove().call();
+                                    try {
+                                        waitingCount.incrementAndGet();
+                                        queue.wait();
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
                                     }
                                 }
-                            } else {
-                                //wait
                             }
                         }
                     }
@@ -167,6 +170,14 @@ public final class PriorityScheduler implements SchedulerLifecycle {
         public Subscription schedule(final Action0 action) {
             PriorityAction wrapped = new PriorityAction(action, priority);
             queue.add(wrapped);
+
+            int runningCount = maxThreads - waitingCount.get();
+            if (runningCount != maxThreads && runningCount < queue.size()) {
+                synchronized (queue) {
+                    queue.notify();
+                    waitingCount.decrementAndGet();
+                }
+            }
             return wrapped;
         }
 
@@ -206,7 +217,5 @@ public final class PriorityScheduler implements SchedulerLifecycle {
             queue.remove(this);
             unsubscribed = true;
         }
-
-
     }
 }
