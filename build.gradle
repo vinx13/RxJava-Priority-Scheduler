@@ -1,5 +1,5 @@
 group 'io.github.vinx13'
-version '1.0-SNAPSHOT'
+version '0.1'
 
 apply plugin: 'java'
 
