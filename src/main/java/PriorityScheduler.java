@@ -43,7 +43,7 @@ public final class PriorityScheduler implements SchedulerLifecycle {
         this.maxThreads = maxThreads;
         this.threadFactory = threadFactory;
         this.pool = new AtomicReference<FixedSchedulerPool>(NONE);
-        queue = new BoundedPriorityBlockingQueue<>(maxQueueSize);
+        queue = new BoundedPriorityBlockingQueue<PriorityAction>(maxQueueSize);
         waitingCount = new AtomicInteger(0);
         start();
     }
